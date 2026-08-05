@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>包裝出貨自動錄影系統</title>
-  <!-- 引入動態條碼辨識庫 -->
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <!-- 引入專為 1D 一維條碼打造的高速解碼庫 Quagga2 -->
+  <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
   <style>
     * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { padding: 16px; background: #f4f6f8; margin: 0; }
@@ -14,7 +14,10 @@
     label { font-weight: bold; font-size: 14px; margin-bottom: 6px; display: block; }
     input[type="text"] { width: 100%; padding: 12px; font-size: 18px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 12px; text-align: center; font-weight: bold; }
     
-    #interactive-scanner { width: 100%; height: 260px; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 12px; display: none; }
+    #interactive-scanner { width: 100%; height: 250px; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 12px; display: none; position: relative; }
+    #interactive-scanner video { width: 100%; height: 100%; object-fit: cover; }
+    #interactive-scanner canvas.drawingBuffer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
     #videoInput { display: none; }
     
     .btn { width: 100%; padding: 16px; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; margin-bottom: 12px; }
@@ -33,10 +36,10 @@
   <label for="barcode">條碼單號：</label>
   <input type="text" id="barcode" placeholder="請點下方按鈕自動掃碼">
 
-  <!-- 即時動態掃條碼鏡頭區域 -->
+  <!-- 即時動態掃條碼區域 -->
   <div id="interactive-scanner"></div>
 
-  <button id="btnScan" class="btn btn-scan" onclick="startLiveScanner()">📷 開啟動態鏡頭掃條碼</button>
+  <button id="btnScan" class="btn btn-scan" onclick="startLiveScanner()">📷 開啟極速條碼掃描</button>
 
   <!-- 原生錄影觸發器 -->
   <input type="file" id="videoInput" accept="video/*" capture="environment" onchange="handleVideoSelect(event)">
@@ -44,74 +47,72 @@
   <button id="btnRecord" class="btn btn-record" onclick="triggerVideoCamera()">🎥 開啟相機錄影</button>
   <button id="btnUpload" class="btn btn-upload" onclick="uploadVideo()">☁️ 確定並上傳影片</button>
 
-  <div id="status">請先點擊「開啟動態鏡頭掃條碼」</div>
+  <div id="status">請先點擊「開啟極速條碼掃描」</div>
 </div>
 
 <script>
   // ⚠️ 請填入您的 Google Apps Script Web App URL
   const GAS_API_URL = "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec"; 
   
-  let html5Scanner = null;
+  let isScanning = false;
   let selectedVideoFile = null;
 
   function startLiveScanner() {
     const scannerDiv = document.getElementById('interactive-scanner');
     scannerDiv.style.display = 'block';
-    document.getElementById('status').innerText = "🔍 請對準條碼（對焦中...）";
+    document.getElementById('status').innerText = "🔍 請將條碼保持離鏡頭 20-30 公分（對焦中）...";
 
-    // 強制指定一維物流/商品條碼格式，大幅提升解碼速度與精準度
-    const formatsToSupport = [
-      Html5QrcodeSupportedFormats.EAN_13,
-      Html5QrcodeSupportedFormats.CODE_128,
-      Html5QrcodeSupportedFormats.CODE_39,
-      Html5QrcodeSupportedFormats.UPC_A,
-      Html5QrcodeSupportedFormats.EAN_8,
-      Html5QrcodeSupportedFormats.ITF,
-      Html5QrcodeSupportedFormats.CODABAR,
-      Html5QrcodeSupportedFormats.QR_CODE
-    ];
-
-    html5Scanner = new Html5Qrcode("interactive-scanner", { formatsToSupport: formatsToSupport });
-
-    // 強制要求高清 720p/1080p 解析度，確保線條清晰
-    const config = { 
-      fps: 20, 
-      qrbox: (vWidth, vHeight) => ({ width: Math.floor(vWidth * 0.85), height: Math.floor(vHeight * 0.45) }),
-      videoConstraints: {
-        facingMode: { exact: "environment" },
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
+    Quagga.init({
+      inputStream: {
+        name: "Live",
+        type: "LiveStream",
+        target: document.querySelector('#interactive-scanner'),
+        constraints: {
+          width: { min: 640, ideal: 1280 },
+          height: { min: 480, ideal: 720 },
+          facingMode: "environment"
+        }
       },
-      experimentalFeatures: { useBarCodeDetectorIfSupported: true }
-    };
-
-    html5Scanner.start(
-      { facingMode: "environment" }, 
-      config,
-      (decodedText) => {
-        document.getElementById('barcode').value = decodedText;
-        document.getElementById('status').innerText = "✅ 自動掃描成功：" + decodedText;
-        stopScanner();
+      locator: {
+        patchSize: "medium",
+        halfSample: true
       },
-      (error) => { /* 背景持續比對 */ }
-    ).catch(err => {
-      // 備援：若 exact environment 失敗，切換普通後鏡頭
-      html5Scanner.start({ facingMode: "environment" }, { fps: 20, qrbox: { width: 280, height: 120 } }, (decodedText) => {
-        document.getElementById('barcode').value = decodedText;
-        document.getElementById('status').innerText = "✅ 自動掃描成功：" + decodedText;
+      numOfWorkers: navigator.hardwareConcurrency || 4,
+      decoder: {
+        readers: [
+          "code_128_reader",
+          "ean_reader",
+          "code_39_reader",
+          "ean_8_reader",
+          "upc_reader"
+        ]
+      },
+      locate: true
+    }, function(err) {
+      if (err) {
+        document.getElementById('status').innerText = "❌ 鏡頭啟動失敗：" + err;
+        return;
+      }
+      Quagga.start();
+      isScanning = true;
+    });
+
+    // 監聽掃描結果
+    Quagga.onDetected(function(result) {
+      if (result && result.codeResult && result.codeResult.code) {
+        const code = result.codeResult.code;
+        document.getElementById('barcode').value = code;
+        document.getElementById('status').innerText = "✅ 掃描成功：" + code;
         stopScanner();
-      }).catch(e => {
-        document.getElementById('status').innerText = "❌ 鏡頭啟動失敗：" + e;
-      });
+      }
     });
   }
 
   function stopScanner() {
-    if (html5Scanner) {
-      html5Scanner.stop().then(() => {
-        html5Scanner.clear();
-        document.getElementById('interactive-scanner').style.display = 'none';
-      }).catch(() => {});
+    if (isScanning) {
+      Quagga.stop();
+      document.getElementById('interactive-scanner').style.display = 'none';
+      isScanning = false;
     }
   }
 
