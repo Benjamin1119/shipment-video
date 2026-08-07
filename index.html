@@ -26,6 +26,50 @@
     .btn-upload { background: #fbbc04; color: #000; display: none; }
     .btn:disabled { background: #ccc; cursor: not-allowed; }
     #status { text-align: center; font-weight: bold; margin-top: 10px; font-size: 14px; word-break: break-all; }
+
+    /* 彈跳視窗 Modal 樣式 */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.65);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 16px;
+    }
+    .modal-card {
+      background: #fff;
+      width: 100%;
+      max-width: 400px;
+      padding: 24px;
+      border-radius: 16px;
+      text-align: center;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+      animation: popup 0.2s ease-out;
+    }
+    @keyframes popup {
+      from { transform: scale(0.85); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    .modal-card h3 { margin-top: 0; color: #1a73e8; font-size: 20px; }
+    .modal-subtitle { font-size: 14px; color: #555; margin-bottom: 14px; }
+    .modal-input {
+      width: 100%;
+      padding: 14px;
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+      border: 2px solid #1a73e8;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      background: #f0f4f9;
+      color: #111;
+      letter-spacing: 1px;
+    }
+    .modal-actions { display: flex; flex-direction: column; gap: 10px; }
+    .btn-confirm { background: #34a853; color: white; margin-bottom: 0; }
+    .btn-retry { background: #dc3545; color: white; margin-bottom: 0; }
   </style>
 </head>
 <body>
@@ -50,8 +94,21 @@
   <div id="status">請先點擊「開啟極速條碼掃描」</div>
 </div>
 
+<!-- 條碼確認彈跳視窗 Modal -->
+<div id="confirmModal" class="modal-overlay">
+  <div class="modal-card">
+    <h3>🔍 請核對條碼單號</h3>
+    <div class="modal-subtitle">請比對託運單，若有誤可直接點擊修改：</div>
+    <input type="text" id="modalBarcodeDisplay" class="modal-input" autofocus>
+    <div class="modal-actions">
+      <button class="btn btn-confirm" onclick="confirmBarcodeAndRecord()">✅ 正確，開啟錄影</button>
+      <button class="btn btn-retry" onclick="rescanBarcode()">🔄 判讀錯誤，重新掃描</button>
+    </div>
+  </div>
+</div>
+
 <script>
-  // ⚠️ 請填入您的 Google Apps Script Web App URL
+  // Google Apps Script Web App URL
   const GAS_API_URL = "https://script.google.com/macros/s/AKfycbykyXpsrAhTuS6wwjto-omnQXEuW84mupGB319fMl_OtjqsVmq8q4yX2XZReccJwiRU/exec"; 
   
   let isScanning = false;
@@ -101,9 +158,8 @@
     Quagga.onDetected(function(result) {
       if (result && result.codeResult && result.codeResult.code) {
         const code = result.codeResult.code;
-        document.getElementById('barcode').value = code;
-        document.getElementById('status').innerText = "✅ 掃描成功：" + code;
         stopScanner();
+        showConfirmModal(code);
       }
     });
   }
@@ -114,6 +170,39 @@
       document.getElementById('interactive-scanner').style.display = 'none';
       isScanning = false;
     }
+  }
+
+  // 顯示彈跳確認視窗
+  function showConfirmModal(code) {
+    document.getElementById('modalBarcodeDisplay').value = code;
+    document.getElementById('confirmModal').style.display = 'flex';
+    document.getElementById('status').innerText = "⚠️ 請在彈跳視窗中核對條碼數值";
+  }
+
+  // 關閉彈跳視窗
+  function hideConfirmModal() {
+    document.getElementById('confirmModal').style.display = 'none';
+  }
+
+  // 使用者點擊「✅ 正確，開啟錄影」
+  function confirmBarcodeAndRecord() {
+    const confirmedCode = document.getElementById('modalBarcodeDisplay').value.trim();
+    if (!confirmedCode) {
+      alert("請輸入或確認條碼單號！");
+      return;
+    }
+    document.getElementById('barcode').value = confirmedCode;
+    hideConfirmModal();
+    document.getElementById('status').innerText = "✅ 條碼已確認：" + confirmedCode;
+    
+    // 自動進入開啟相機錄影步驟
+    triggerVideoCamera();
+  }
+
+  // 使用者點擊「🔄 判讀錯誤，重新掃描」
+  function rescanBarcode() {
+    hideConfirmModal();
+    startLiveScanner();
   }
 
   function triggerVideoCamera() {
